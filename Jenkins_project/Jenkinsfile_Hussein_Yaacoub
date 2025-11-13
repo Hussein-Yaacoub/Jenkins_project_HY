@@ -1,113 +1,137 @@
 pipeline {
   agent any
-  environment { VENV = ".venv" }
   options { timestamps() }
 
   stages {
 
-   stage('Setup') {
-    steps {
+   
+    stage('Setup') {
+      steps {
         dir('Jenkins_project') {
-            bat """
-            rem === Use YOUR installed Python path ===
-            set "PYEXE=C:\\Users\\LENOVO\\AppData\\Local\\Programs\\Python\\Python313\\python.exe"
+          bat """
+          rem === Use installed Python path ===
+          set "PYEXE=C:\\Users\\LENOVO\\AppData\\Local\\Programs\\Python\\Python313\\python.exe"
 
-            if not exist "%PYEXE%" (
-                echo ERROR: Python not found at %PYEXE%
-                exit /b 1
-            )
+          if not exist "%PYEXE%" (
+              echo ERROR: Python not found at %PYEXE%
+              exit /b 1
+          )
 
-            rem === Create venv if not exists ===
-            "%PYEXE%" -m venv venv
+          rem === Create venv if not exists ===
+          "%PYEXE%" -m venv venv
 
-            call venv\\Scripts\\activate.bat
-
-            pip install --upgrade pip
-            pip install -r requirements.txt
-            """
+          rem === Activate & install deps ===
+          call venv\\Scripts\\activate.bat
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          """
         }
+      }
     }
-}
 
-
+ 
     stage('Lint') {
       steps {
-        dir('jenkins_project') {
+        dir('Jenkins_project') {
           script {
-            // run flake8 but do NOT fail the build if it returns non-zero
-            def rc = bat(returnStatus: true, script: '"./%VENV%/Scripts/flake8" app.py')
+            def rc = bat(
+              returnStatus: true,
+              script: """
+                call venv\\Scripts\\activate.bat
+                venv\\Scripts\\flake8 app.py
+              """
+            )
             echo "flake8 exit code = ${rc}"
             if (rc != 0) {
               currentBuild.result = 'UNSTABLE'
-              echo 'Lint warnings/errors present (marking UNSTABLE, continuing).'
+              echo 'Lint warnings/errors present (UNSTABLE).'
             }
           }
         }
       }
     }
 
+ 
     stage('Test') {
       steps {
-        dir('jenkins_project') {
-          // if you want tests to be non-fatal too, wrap like Lint with returnStatus
-          bat '"./%VENV%/Scripts/pytest" -q --junitxml=junit.xml'
+        dir('Jenkins_project') {
+          bat """
+            call venv\\Scripts\\activate.bat
+            venv\\Scripts\\pytest -q --junitxml=junit.xml
+          """
         }
       }
     }
+
 
     stage('Coverage') {
       steps {
-        dir('jenkins_project') {
+        dir('Jenkins_project') {
           script {
-            def rc = bat(returnStatus: true, script: '''
-              ".\\%VENV%\\Scripts\\coverage" run -m pytest -q
-              ".\\%VENV%\\Scripts\\coverage" xml -o coverage_report.xml
-              ".\\%VENV%\\Scripts\\coverage" report -m > coverage_summary.txt
-            ''')
+            def rc = bat(
+              returnStatus: true,
+              script: """
+                call venv\\Scripts\\activate.bat
+                venv\\Scripts\\coverage run -m pytest -q
+                venv\\Scripts\\coverage xml -o coverage_report.xml
+                venv\\Scripts\\coverage report -m > coverage_summary.txt
+              """
+            )
             echo "coverage step exit code = ${rc}"
             if (rc != 0) {
               currentBuild.result = 'UNSTABLE'
-              echo 'Coverage step had issues (marking UNSTABLE, continuing).'
+              echo 'Coverage step had issues (UNSTABLE).'
             }
           }
         }
       }
     }
 
+
     stage('Security Scan') {
       steps {
-        dir('jenkins_project') {
+        dir('Jenkins_project') {
           script {
-            // Run Bandit but never affect the build result
-            def rc = bat(returnStatus: true, script: '''
-              ".\\%VENV%\\Scripts\\bandit" -r . --severity-level high --confidence-level high -f json -o bandit_report.json
-            ''')
+            def rc = bat(
+              returnStatus: true,
+              script: """
+                call venv\\Scripts\\activate.bat
+                venv\\Scripts\\bandit -r . -f json -o bandit_report.json
+              """
+            )
             echo "bandit exit code = ${rc} (ignored for build status)"
-            // DO NOT set currentBuild.result here -> build remains SUCCESS
           }
         }
       }
     }
 
+   
     stage('Deploy') {
       steps {
-        dir('jenkins_project') {
-          bat '''
+        dir('Jenkins_project') {
+          bat """
+            call venv\\Scripts\\activate.bat
             if not exist dist mkdir dist
-            ".\\%VENV%\\Scripts\\python" app.py > dist\\program_output.txt
+            venv\\Scripts\\python app.py > dist\\program_output.txt
+          """
+
+          powershell '''
+            Compress-Archive -Path app.py, requirements.txt -DestinationPath dist\\app_release.zip -Force
           '''
-          powershell 'Compress-Archive -Path app.py, requirements.txt -DestinationPath dist\\app_release.zip -Force'
         }
       }
     }
-  }
+
+  }  // end stages
+
 
   post {
     always {
-      dir('jenkins_project') {
+      dir('Jenkins_project') {
         archiveArtifacts artifacts: 'junit.xml,coverage_report.xml,coverage_summary.txt,bandit_report.json,dist/**', fingerprint: true
       }
       cleanWs()
     }
   }
 }
+
