@@ -5,31 +5,30 @@ pipeline {
 
   stages {
 
-    stage('Setup') {
-      steps {
-        dir('jenkins_project') {
-          bat '''
-            rem === Locate a Python interpreter for the Jenkins service ===
-            set "PYEXE=C:\\Windows\\py.exe"
-            if not exist "%PYEXE%" set "PYEXE=C:\\Program Files\\Python312\\python.exe"
-            if not exist "%PYEXE%" set "PYEXE=C:\\Program Files\\Python311\\python.exe"
-            if not exist "%PYEXE%" set "PYEXE=%USERPROFILE%\\AppData\\Local\\Programs\\Python\\Python312\\python.exe"
-            if not exist "%PYEXE%" set "PYEXE=%USERPROFILE%\\anaconda3\\python.exe"
+   stage('Setup') {
+    steps {
+        dir('Jenkins_project') {
+            bat """
+            rem === Use YOUR installed Python path ===
+            set "PYEXE=C:\\Users\\LENOVO\\AppData\\Local\\Programs\\Python\\Python313\\python.exe"
 
             if not exist "%PYEXE%" (
-              echo ERROR: No system Python found for Jenkins service.
-              exit /b 1
+                echo ERROR: Python not found at %PYEXE%
+                exit /b 1
             )
 
-            "%PYEXE%" --version
+            rem === Create venv if not exists ===
+            "%PYEXE%" -m venv venv
 
-            if not exist %VENV% ("%PYEXE%" -m venv %VENV%)
-            ".\\%VENV%\\Scripts\\python" -m pip install --upgrade pip
-            ".\\%VENV%\\Scripts\\python" -m pip install -r requirements.txt
-          '''
+            call venv\\Scripts\\activate.bat
+
+            pip install --upgrade pip
+            pip install -r requirements.txt
+            """
         }
-      }
     }
+}
+
 
     stage('Lint') {
       steps {
