@@ -4,7 +4,7 @@ pipeline {
 
   stages {
 
-    /* ---------- SETUP: venv + deps ---------- */
+    
     stage('Setup') {
       steps {
         // create venv inside Jenkins_project
@@ -30,7 +30,7 @@ pipeline {
       }
     }
 
-    /* ---------- LINT: non-fatal ---------- */
+   
     stage('Lint') {
       steps {
         script {
@@ -50,7 +50,7 @@ pipeline {
       }
     }
 
-    /* ---------- TEST: run from workspace root so imports work ---------- */
+    
     stage('Test') {
       steps {
         bat """
@@ -60,7 +60,7 @@ pipeline {
       }
     }
 
-    /* ---------- COVERAGE: non-fatal ---------- */
+   
     stage('Coverage') {
       steps {
         script {
@@ -82,7 +82,7 @@ pipeline {
       }
     }
 
-    /* ---------- SECURITY: non-fatal ---------- */
+    
     stage('Security Scan') {
       steps {
         script {
@@ -98,7 +98,7 @@ pipeline {
       }
     }
 
-    /* ---------- DEPLOY: demo run + zip ---------- */
+    
     stage('Deploy') {
       steps {
         dir('Jenkins_project') {
