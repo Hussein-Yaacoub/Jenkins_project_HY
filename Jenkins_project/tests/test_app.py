@@ -1,6 +1,6 @@
 # tests/test_app.py
 import unittest
-from Jenkins_project.app import greet
+from app import greet
 
 
 class TestApp(unittest.TestCase):
