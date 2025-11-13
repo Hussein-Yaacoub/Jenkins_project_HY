@@ -5,139 +5,107 @@ pipeline {
 
   stages {
 
-    /* ============================================================
-       SETUP: Create venv & install dependencies
-       ============================================================ */
     stage('Setup') {
       steps {
-        // Run setup inside the Jenkins_project folder
-        dir('Jenkins_project') {
-          bat """
-          rem === Use installed Python path ===
-          set "PYEXE=C:\\Users\\LENOVO\\AppData\\Local\\Programs\\Python\\Python313\\python.exe"
+        dir('jenkins_project') {
+          bat '''
+            rem === Locate a Python interpreter for the Jenkins service ===
+            set "PYEXE=C:\\Windows\\py.exe"
+            if not exist "%PYEXE%" set "PYEXE=C:\\Program Files\\Python312\\python.exe"
+            if not exist "%PYEXE%" set "PYEXE=C:\\Program Files\\Python311\\python.exe"
+            if not exist "%PYEXE%" set "PYEXE=%USERPROFILE%\\AppData\\Local\\Programs\\Python\\Python312\\python.exe"
+            if not exist "%PYEXE%" set "PYEXE=%USERPROFILE%\\anaconda3\\python.exe"
 
-          if not exist "%PYEXE%" (
-              echo ERROR: Python not found at %PYEXE%
+            if not exist "%PYEXE%" (
+              echo ERROR: No system Python found for Jenkins service.
               exit /b 1
-          )
+            )
 
-          rem === Create venv (re-usable) ===
-          "%PYEXE%" -m venv venv
+            "%PYEXE%" --version
 
-          rem === Activate & install deps ===
-          call venv\\Scripts\\activate.bat
-          pip install --upgrade pip
-          pip install -r requirements.txt
-          """
-        }
-      }
-    }
-
-    /* ============================================================
-       LINT: run flake8 (non-fatal warnings)
-       ============================================================ */
-    stage('Lint') {
-      steps {
-        // Run from WORKSPACE ROOT; lint the main app file
-        script {
-          def rc = bat(
-            returnStatus: true,
-            script: """
-              call Jenkins_project\\venv\\Scripts\\activate.bat
-              Jenkins_project\\venv\\Scripts\\flake8 Jenkins_project\\app.py
-            """
-          )
-          echo "flake8 exit code = ${rc}"
-          if (rc != 0) {
-            currentBuild.result = 'UNSTABLE'
-            echo 'Lint warnings/errors present (UNSTABLE).'
-          }
-        }
-      }
-    }
-
-    /* ============================================================
-       TEST: run pytest (fail build if tests fail)
-       ============================================================ */
-    stage('Test') {
-      steps {
-        // Run pytest from WORKSPACE ROOT so "from Jenkins_project.app" works
-        bat """
-          call Jenkins_project\\venv\\Scripts\\activate.bat
-          pytest -q Jenkins_project --junitxml=Jenkins_project\\junit.xml
-        """
-      }
-    }
-
-    /* ============================================================
-       COVERAGE: run coverage around pytest (non-fatal)
-       ============================================================ */
-    stage('Coverage') {
-      steps {
-        script {
-          def rc = bat(
-            returnStatus: true,
-            script: """
-              call Jenkins_project\\venv\\Scripts\\activate.bat
-              coverage run -m pytest -q Jenkins_project
-              coverage xml -o Jenkins_project\\coverage_report.xml
-              coverage report -m > Jenkins_project\\coverage_summary.txt
-            """
-          )
-          echo "coverage step exit code = ${rc}"
-          if (rc != 0) {
-            currentBuild.result = 'UNSTABLE'
-            echo 'Coverage step had issues (UNSTABLE).'
-          }
-        }
-      }
-    }
-
-    /* ============================================================
-       SECURITY: run bandit (non-fatal)
-       ============================================================ */
-    stage('Security Scan') {
-      steps {
-        script {
-          def rc = bat(
-            returnStatus: true,
-            script: """
-              call Jenkins_project\\venv\\Scripts\\activate.bat
-              bandit -r Jenkins_project -f json -o Jenkins_project\\bandit_report.json
-            """
-          )
-          echo "bandit exit code = ${rc} (ignored for build status)"
-        }
-      }
-    }
-
-    /* ============================================================
-       DEPLOY: simple "deploy" (run app & package files)
-       ============================================================ */
-    stage('Deploy') {
-      steps {
-        // Here we go inside Jenkins_project again
-        dir('Jenkins_project') {
-          bat """
-            call venv\\Scripts\\activate.bat
-            if not exist dist mkdir dist
-            venv\\Scripts\\python app.py > dist\\program_output.txt
-          """
-          powershell '''
-            Compress-Archive -Path app.py, requirements.txt -DestinationPath dist\\app_release.zip -Force
+            if not exist %VENV% ("%PYEXE%" -m venv %VENV%)
+            ".\\%VENV%\\Scripts\\python" -m pip install --upgrade pip
+            ".\\%VENV%\\Scripts\\python" -m pip install -r requirements.txt
           '''
         }
       }
     }
 
-  } // end stages
+    stage('Lint') {
+      steps {
+        dir('jenkins_project') {
+          script {
+            // run flake8 but do NOT fail the build if it returns non-zero
+            def rc = bat(returnStatus: true, script: '"./%VENV%/Scripts/flake8" app.py')
+            echo "flake8 exit code = ${rc}"
+            if (rc != 0) {
+              currentBuild.result = 'UNSTABLE'
+              echo 'Lint warnings/errors present (marking UNSTABLE, continuing).'
+            }
+          }
+        }
+      }
+    }
 
-  /* ============================================================
-     POST: archive artifacts & clean workspace
-     ============================================================ */
+    stage('Test') {
+      steps {
+        dir('jenkins_project') {
+          // if you want tests to be non-fatal too, wrap like Lint with returnStatus
+          bat '"./%VENV%/Scripts/pytest" -q --junitxml=junit.xml'
+        }
+      }
+    }
+
+    stage('Coverage') {
+      steps {
+        dir('jenkins_project') {
+          script {
+            def rc = bat(returnStatus: true, script: '''
+              ".\\%VENV%\\Scripts\\coverage" run -m pytest -q
+              ".\\%VENV%\\Scripts\\coverage" xml -o coverage_report.xml
+              ".\\%VENV%\\Scripts\\coverage" report -m > coverage_summary.txt
+            ''')
+            echo "coverage step exit code = ${rc}"
+            if (rc != 0) {
+              currentBuild.result = 'UNSTABLE'
+              echo 'Coverage step had issues (marking UNSTABLE, continuing).'
+            }
+          }
+        }
+      }
+    }
+
+    stage('Security Scan') {
+      steps {
+        dir('jenkins_project') {
+          script {
+            // Run Bandit but never affect the build result
+            def rc = bat(returnStatus: true, script: '''
+              ".\\%VENV%\\Scripts\\bandit" -r . --severity-level high --confidence-level high -f json -o bandit_report.json
+            ''')
+            echo "bandit exit code = ${rc} (ignored for build status)"
+            // DO NOT set currentBuild.result here -> build remains SUCCESS
+          }
+        }
+      }
+    }
+
+    stage('Deploy') {
+      steps {
+        dir('jenkins_project') {
+          bat '''
+            if not exist dist mkdir dist
+            ".\\%VENV%\\Scripts\\python" app.py > dist\\program_output.txt
+          '''
+          powershell 'Compress-Archive -Path app.py, requirements.txt -DestinationPath dist\\app_release.zip -Force'
+        }
+      }
+    }
+  }
+
   post {
     always {
-      dir('Jenkins_project') {
+      dir('jenkins_project') {
         archiveArtifacts artifacts: 'junit.xml,coverage_report.xml,coverage_summary.txt,bandit_report.json,dist/**', fingerprint: true
       }
       cleanWs()
