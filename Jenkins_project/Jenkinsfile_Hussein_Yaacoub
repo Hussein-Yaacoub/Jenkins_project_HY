@@ -4,9 +4,12 @@ pipeline {
 
   stages {
 
-   
+    /* ============================================================
+       SETUP: Create venv & install dependencies
+       ============================================================ */
     stage('Setup') {
       steps {
+        // Run setup inside the Jenkins_project folder
         dir('Jenkins_project') {
           bat """
           rem === Use installed Python path ===
@@ -17,7 +20,7 @@ pipeline {
               exit /b 1
           )
 
-          rem === Create venv if not exists ===
+          rem === Create venv (re-usable) ===
           "%PYEXE%" -m venv venv
 
           rem === Activate & install deps ===
@@ -29,92 +32,96 @@ pipeline {
       }
     }
 
- 
+    /* ============================================================
+       LINT: run flake8 (non-fatal warnings)
+       ============================================================ */
     stage('Lint') {
       steps {
-        dir('Jenkins_project') {
-          script {
-            def rc = bat(
-              returnStatus: true,
-              script: """
-                call venv\\Scripts\\activate.bat
-                venv\\Scripts\\flake8 app.py
-              """
-            )
-            echo "flake8 exit code = ${rc}"
-            if (rc != 0) {
-              currentBuild.result = 'UNSTABLE'
-              echo 'Lint warnings/errors present (UNSTABLE).'
-            }
+        // Run from WORKSPACE ROOT; lint the main app file
+        script {
+          def rc = bat(
+            returnStatus: true,
+            script: """
+              call Jenkins_project\\venv\\Scripts\\activate.bat
+              Jenkins_project\\venv\\Scripts\\flake8 Jenkins_project\\app.py
+            """
+          )
+          echo "flake8 exit code = ${rc}"
+          if (rc != 0) {
+            currentBuild.result = 'UNSTABLE'
+            echo 'Lint warnings/errors present (UNSTABLE).'
           }
         }
       }
     }
 
- 
+    /* ============================================================
+       TEST: run pytest (fail build if tests fail)
+       ============================================================ */
     stage('Test') {
       steps {
-        dir('Jenkins_project') {
-          bat """
-            call venv\\Scripts\\activate.bat
-            venv\\Scripts\\pytest -q --junitxml=junit.xml
-          """
-        }
+        // Run pytest from WORKSPACE ROOT so "from Jenkins_project.app" works
+        bat """
+          call Jenkins_project\\venv\\Scripts\\activate.bat
+          pytest -q Jenkins_project --junitxml=Jenkins_project\\junit.xml
+        """
       }
     }
 
-
+    /* ============================================================
+       COVERAGE: run coverage around pytest (non-fatal)
+       ============================================================ */
     stage('Coverage') {
       steps {
-        dir('Jenkins_project') {
-          script {
-            def rc = bat(
-              returnStatus: true,
-              script: """
-                call venv\\Scripts\\activate.bat
-                venv\\Scripts\\coverage run -m pytest -q
-                venv\\Scripts\\coverage xml -o coverage_report.xml
-                venv\\Scripts\\coverage report -m > coverage_summary.txt
-              """
-            )
-            echo "coverage step exit code = ${rc}"
-            if (rc != 0) {
-              currentBuild.result = 'UNSTABLE'
-              echo 'Coverage step had issues (UNSTABLE).'
-            }
+        script {
+          def rc = bat(
+            returnStatus: true,
+            script: """
+              call Jenkins_project\\venv\\Scripts\\activate.bat
+              coverage run -m pytest -q Jenkins_project
+              coverage xml -o Jenkins_project\\coverage_report.xml
+              coverage report -m > Jenkins_project\\coverage_summary.txt
+            """
+          )
+          echo "coverage step exit code = ${rc}"
+          if (rc != 0) {
+            currentBuild.result = 'UNSTABLE'
+            echo 'Coverage step had issues (UNSTABLE).'
           }
         }
       }
     }
 
-
+    /* ============================================================
+       SECURITY: run bandit (non-fatal)
+       ============================================================ */
     stage('Security Scan') {
       steps {
-        dir('Jenkins_project') {
-          script {
-            def rc = bat(
-              returnStatus: true,
-              script: """
-                call venv\\Scripts\\activate.bat
-                venv\\Scripts\\bandit -r . -f json -o bandit_report.json
-              """
-            )
-            echo "bandit exit code = ${rc} (ignored for build status)"
-          }
+        script {
+          def rc = bat(
+            returnStatus: true,
+            script: """
+              call Jenkins_project\\venv\\Scripts\\activate.bat
+              bandit -r Jenkins_project -f json -o Jenkins_project\\bandit_report.json
+            """
+          )
+          echo "bandit exit code = ${rc} (ignored for build status)"
         }
       }
     }
 
-   
+    /* ============================================================
+       DEPLOY: simple "deploy" (run app & package files)
+       ============================================================ */
     stage('Deploy') {
       steps {
+        // Here we go inside Jenkins_project again
         dir('Jenkins_project') {
           bat """
             call venv\\Scripts\\activate.bat
             if not exist dist mkdir dist
             venv\\Scripts\\python app.py > dist\\program_output.txt
           """
-
           powershell '''
             Compress-Archive -Path app.py, requirements.txt -DestinationPath dist\\app_release.zip -Force
           '''
@@ -122,9 +129,11 @@ pipeline {
       }
     }
 
-  }  // end stages
+  } // end stages
 
-
+  /* ============================================================
+     POST: archive artifacts & clean workspace
+     ============================================================ */
   post {
     always {
       dir('Jenkins_project') {
@@ -134,4 +143,3 @@ pipeline {
     }
   }
 }
-
